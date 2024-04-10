@@ -1,10 +1,17 @@
 import torch
 import tensorflow as tf
 import numpy as np
-from dataset import LegalDocuments
+import pandas as pd
+from dataset import NERDocuments
 import models
 import matplotlib.pyplot as plt
 from logger import Logger
+from seqeval.metrics import classification_report
+from sklearn.metrics import classification_report as c_report
+import copy
+import wandb
+import seaborn as sns
+from torch.utils.data import DataLoader
 
 if torch.cuda.is_available():
     device = torch.device('cuda')
@@ -30,12 +37,12 @@ def load_data(dataset):
     
     return (dataset.load_train_data(), dataset.load_test_data(), dataset.load_valid_data())
 
-def train(model, train_data, valid_data, loss_function, optimiser, indexed_tokens, indexed_labels, logger, steps, epochs = 5):
+def train(model, training_loader, validation_loader, loss_function, optimiser, vocab, indexed_labels, logger, steps, epochs = 5):
 
-    (tokens, labels) = train_data
+    #(tokens, labels) = training_loader[0]
 
-    print(tokens)
-    print(labels)
+    #print(tokens)
+    #print(labels)
 
     """flat_tokens = [token for innerList in tokens for token in innerList]
     token_idx = [idx for idx in range(len(flat_tokens))]
@@ -68,8 +75,8 @@ def train(model, train_data, valid_data, loss_function, optimiser, indexed_token
 
     indexed_valid_labels = dict(zip(unique_valid_labels, [idx for idx in range(len(unique_valid_labels))]))"""
 
-    print(indexed_labels)
-    print(len(tokens), len(indexed_tokens))
+    #print(indexed_labels)
+    #print(len(tokens), len(labels), len(vocab))
 
     """model = models.LSTMTagger(EMBEDDING_DIM, HIDDEN_DIM, len(token_to_ix), len(label_to_ix))
     loss_function = torch.nn.NLLLoss()
@@ -90,13 +97,15 @@ def train(model, train_data, valid_data, loss_function, optimiser, indexed_token
         epoch_losses = []
         valid_accuracies = []
         
-        for idx in range(steps):
+        for idx, batch in enumerate(training_loader):
             
-            print(f'Epoch: {epoch}, Step {idx} of {steps}')
+            print(f'Epoch: {epoch}, Step {idx} of {len(training_loader)}')
+
+            (tokens, labels) = batch[0]
 
             model.zero_grad()
 
-            inputs = convert_to_tensor(tokens[idx], indexed_tokens)
+            inputs = convert_to_tensor(tokens[idx], vocab)
             targets = convert_to_tensor(labels[idx], indexed_labels)
 
             inputs = inputs.to(device)
@@ -113,37 +122,40 @@ def train(model, train_data, valid_data, loss_function, optimiser, indexed_token
             optimiser.step()
             epoch_losses.append(np.float64(loss.cpu().detach().numpy()))
             
-            #with torch.no_grad():
+            with torch.no_grad():
+                model.eval()
+
+                max_idx = []
+
+                #(valid_tokens, valid_labels) = batch[1]
                 
-            valid_set = []
-            max_idx = []
+                for idx, batch in enumerate(validation_loader):
+                    valid_set = []
+                    
+                    valid_inputs = convert_to_tensor(batch[0][idx], vocab)
+                    valid_targets = convert_to_tensor(batch[1][idx], indexed_labels)
 
-            (valid_tokens, valid_labels) = valid_data
-            model.eval()
+                    #print(f'Valid Targets: {valid_targets.tolist()}')
 
-            for idx in range(10):
-                valid_inputs = convert_to_tensor(valid_tokens[idx], indexed_tokens)
-                valid_targets = convert_to_tensor(valid_labels[idx], indexed_labels)
+                    valid_inputs = valid_inputs.to(device)
+                    valid_targets = valid_targets.to(device)
+            
+                    valid_predictions = model(valid_inputs)
 
-                #print(valid_targets)
+                    valid_predictions.to(device)
 
-                valid_inputs = valid_inputs.to(device)
-                valid_targets = valid_targets.to(device)
-        
-                valid_predictions = model(valid_inputs)
+                    for prediction in valid_predictions:
+                        #print(torch.argmax(prediction))
+                        valid_set.append(np.int64(torch.argmax(prediction).cpu()))
+                        #print(f'Predictions: {torch.argmax(prediction)}')
 
-                valid_predictions.to(device)
+                    #print(f'Valid Set: {valid_set}')
 
-                for prediction in valid_predictions:
-                    valid_set.append(torch.argmax(prediction))
-                    #print(f'Predictions: {torch.argmax(prediction)}')
-
-                #print(valid_set)
-
-                #acc = torch.eq(valid_set, valid_targets.tolist())
-                valid_accuracry = (len(set(valid_set).intersection(valid_targets.tolist()))) / len(valid_set)
-                #print(f'Acc: {valid_accuracry}')
-                valid_accuracies.append(valid_accuracry)
+                    #acc = torch.eq(valid_set, valid_targets.tolist())
+                    valid_accuracry = (len(set(valid_set).intersection(valid_targets.tolist()))) / len(valid_set)
+                    #print(f'Acc: {valid_accuracry}')
+                    valid_accuracies.append(valid_accuracry)
+                    valid_set[:] = []
             
             model.train()
 
@@ -202,20 +214,26 @@ def train(model, train_data, valid_data, loss_function, optimiser, indexed_token
         print(tokens[len(tokens) - 2])
         print(test)"""
 
-    print(average_valid_accuracy)
+    print(f'Validation Accuracies: {average_valid_accuracy}')
     return average_losses, average_valid_accuracy
 
-def test(model, tokens, labels, indexed_tokens, indexed_labels, logger, steps = 5):
+def test(model, tokens, labels, indexed_tokens, labels_to_id, logger, steps = 5):
     with torch.no_grad():
-        valid_set = []
         max_idx = []
         accuracies = []
 
+        y_true = []
+        y_pred = []
+
         model.eval()
 
+        valid_set = []
+
         for idx in range(steps):
+            valid_set[:] = []
+            
             inputs = convert_to_tensor(tokens[idx], indexed_tokens)
-            targets = convert_to_tensor(labels[idx], indexed_labels)
+            targets = convert_to_tensor(labels[idx], labels_to_id)
 
             #print(valid_targets)
 
@@ -227,13 +245,53 @@ def test(model, tokens, labels, indexed_tokens, indexed_labels, logger, steps = 
             predictions.to(device)
 
             for prediction in predictions:
-                valid_set.append(torch.argmax(prediction))
+                valid_set.append(np.int64(torch.argmax(prediction).cpu()))
 
+            #print(len(valid_set))
+            y_true.append(targets.tolist())
+            y_pred.append(copy.deepcopy(valid_set))
+            
             accuracry = (len(set(valid_set).intersection(targets.tolist()))) / len(valid_set)
             #print(f'Acc: {valid_accuracry}')
             accuracies.append(accuracry)
     
     logger.log({'test_accuracy': np.sum(accuracies) / len(accuracies)})
+
+    #print(f'y_true: {y_true}')
+    #print(f'y_pred: {y_pred}')
+
+    y_labels = []
+    y_predictions = []
+
+    #print(len(y_true[0]), len(y_pred[0]))
+
+    for labels in y_true:
+        
+        y_labels.append([list(labels_to_id.keys())[list(labels_to_id.values()).index(idx)] for idx in labels])
+
+    for labels in y_pred:
+
+        y_predictions.append([list(labels_to_id.keys())[list(labels_to_id.values()).index(idx)] for idx in labels])
+
+    print(len(y_labels), len(y_predictions))
+
+    #y_labels = [list(labels_to_id.keys())[list(labels_to_id.values()).index(idx)] for idx in y_true]
+    #y_predictions = [list(labels_to_id.keys())[list(labels_to_id.values()).index(idx)] for idx in y_pred]
+
+    #y_labels = [labels_to_id[id] for id in y_true]
+    #y_predictions = [labels_to_id[id] for id in y_pred]
+
+    #test_report = c_report(y_true, y_pred)
+
+    #print(test_report)
+
+    report = classification_report(y_labels, y_predictions, output_dict = True)
+    print(f'classification_report:\n{report}')
+
+    ax = sns.heatmap(pd.DataFrame(report).iloc[:-1, :].T, annot=True)
+
+    logger.log({'classification_report': wandb.Image(ax.figure)})
+    
 
     return accuracies
 
@@ -273,43 +331,73 @@ def test(model, tokens, labels, indexed_tokens, indexed_labels, logger, steps = 
 
 losses = []
 valid_accuracies = []
-steps = 1000
-epochs = 50
+steps = 10000
+epochs = 5
+TRAIN_BATCH_SIZE = 128
+VALID_BATCH_SIZE = 128
 
 wandb_logger = Logger(f"inm705_cw_test_lstm", project='inm705_cw')
 logger = wandb_logger.get_logger()
+#logger = []
 
-dataset = LegalDocuments()
+dataset = NERDocuments()
 
-train_data, test_data, valid_data = load_data(LegalDocuments())
+train_data, test_data, valid_data = load_data(dataset)
 
 flat_tokens = [*[token for tokens in train_data[0] for token in tokens], 
                *[token for tokens in valid_data[0] for token in tokens], 
                *[token for tokens in test_data[0] for token in tokens]]
 token_idx = [idx for idx in range(len(flat_tokens))]
 
-indexed_tokens = {}
+"""vocab = {}
 
 for token in flat_tokens:
-    if token not in indexed_tokens:
-        indexed_tokens[token] = len(indexed_tokens)
+    if token not in vocab:
+        vocab[token] = len(vocab)"""
+
+vocab = dataset.get_vocab()
 
 flat_labels = [label for labels in train_data[1] for label in labels]
 unique_labels = list(set(flat_labels))
 
-indexed_labels = dict(zip(unique_labels, [idx for idx in range(len(unique_labels))]))
+labels_to_id = dict(zip(unique_labels, [idx for idx in range(len(unique_labels))]))
 
-model = models.LSTMModel(embedding_dim, hidden_dim, len(indexed_tokens), len(indexed_labels))
+model = models.LSTMModel(embedding_dim, hidden_dim, len(vocab), len(labels_to_id))
 loss_function = torch.nn.CrossEntropyLoss()
-optimiser = torch.optim.SGD(model.parameters(), lr=0.1)
+#optimiser = torch.optim.SGD(model.parameters(), lr=0.1)
+optimiser = torch.optim.Adam(model.parameters(), lr = 0.1, weight_decay = 0.0)
 
-losses, valid_accuracies = train(model, train_data, valid_data, loss_function, optimiser, indexed_tokens, indexed_labels, logger, steps, epochs)
+train_params = {'batch_size': TRAIN_BATCH_SIZE,
+                'shuffle': True,
+                'num_workers': 0
+                }
+
+test_params = {'batch_size': VALID_BATCH_SIZE,
+                'shuffle': True,
+                'num_workers': 0
+                }
+
+valid = {'batch_size': VALID_BATCH_SIZE,
+                'shuffle': True,
+                'num_workers': 0
+                }
+
+training_set = [train_data, valid_data]
+testing_set = [test_data[0], test_data[1]]
+validation_set = [valid_data[0], valid_data[1]]
+
+training_loader = DataLoader(training_set, **train_params)
+testing_loader = DataLoader(testing_set, **test_params)
+validation_loader = DataLoader(validation_set, **test_params)
+
+losses, valid_accuracies = train(model, training_loader, validation_loader, loss_function, optimiser, vocab, labels_to_id, logger, steps, epochs)
 
 #print(losses)
 
-plot_loss(epochs, losses, 'losses')
-plot_loss(epochs, valid_accuracies, 'accuracy')
+#plot_loss(epochs, losses, 'losses')
+#plot_loss(epochs, valid_accuracies, 'accuracy')
 
-test_accuracies = test(model, test_data[0], test_data[1], indexed_tokens, indexed_labels, logger, steps = 100)
+test_accuracies = test(model, test_data[0], test_data[1], vocab, labels_to_id, logger, steps = 1000)
+print(f'Test Accuracies: {test_accuracies}')
 
 #plot_loss(1000, test_accuracies, 'test_accuracy')

@@ -40,11 +40,10 @@ class LSTMModel(nn.Module):
 
         #self.word_embeddings = nn.Embedding(vocab_size, embedding_dim)
 
-        # The LSTM takes word embeddings as inputs, and outputs hidden states
-        # with dimensionality hidden_dim.
         #self.lstm = nn.LSTM(embedding_dim, hidden_dim)
 
-        # The linear layer that maps from hidden state space to tag space
+        #self.linear = nn.Linear(hidden_dim, labels_size)
+
         self.model = nn.Sequential(
             nn.Embedding(vocab_size, embedding_dim), 
             nn.LSTM(embedding_dim, hidden_dim), 
