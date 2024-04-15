@@ -53,8 +53,10 @@ class LSTMModel(nn.Module):
     def forward(self, input):
 
         embeddings = self.model[0](input)
-        out_lstm, _ = self.model[1](embeddings.view(len(input), 1, -1))
-        out_linear = self.model[2](out_lstm.view(len(input), -1))
+        #out_lstm, _ = self.model[1](embeddings.view(len(input), 1, -1))
+        out_lstm, _ = self.model[1](embeddings)
+        #out_linear = self.model[2](out_lstm.view(len(input), -1))
+        out_linear = self.model[2](out_lstm)
         predictions = nn.functional.log_softmax(out_linear, dim=1)
 
         return predictions
