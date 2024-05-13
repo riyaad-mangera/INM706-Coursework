@@ -182,7 +182,8 @@ def train(model, training_loader, validation_loader, loss_function, optimiser, v
                     valid_accuracies.append(valid_accuracy)
                     valid_losses.append(np.float64(valid_loss.cpu().detach().numpy()))
 
-                    logger.log({'batch_accuracy': valid_accuracy})
+                    if logger != '':
+                        logger.log({'batch_accuracy': valid_accuracy})
             
             model.train()
 
@@ -194,9 +195,10 @@ def train(model, training_loader, validation_loader, loss_function, optimiser, v
         #logger.log({'average_losses': average_losses})
         #logger.log({'average_valid_accuracy': average_valid_accuracy})
 
-        logger.log({'train_loss': np.sum(epoch_losses) / len(epoch_losses)})
-        logger.log({'validation_accuracy': np.sum(valid_accuracies) / len(valid_accuracies)})
-        logger.log({'validation_loss': np.sum(valid_losses) / len(valid_losses)})
+        if logger != '':
+            logger.log({'train_loss': np.sum(epoch_losses) / len(epoch_losses)})
+            logger.log({'validation_accuracy': np.sum(valid_accuracies) / len(valid_accuracies)})
+            logger.log({'validation_loss': np.sum(valid_losses) / len(valid_losses)})
 
     """with torch.no_grad():
         inputs = convert_to_tensor(tokens[len(tokens) - 2], indexed_tokens)
@@ -295,7 +297,8 @@ def test(model, testing_loader, ids_to_labels, logger):
             #print(f'Acc: {valid_accuracry}')
             accuracies.append(accuracy)
     
-    logger.log({'test_accuracy': np.sum(accuracies) / len(accuracies)})
+    if logger != '':
+        logger.log({'test_accuracy': np.sum(accuracies) / len(accuracies)})
 
     #print(f'y_true: {y_true}')
     #print(f'y_pred: {y_pred}')
@@ -344,7 +347,8 @@ def test(model, testing_loader, ids_to_labels, logger):
     ax = sns.heatmap(pd.DataFrame(report).iloc[:-1, :].T, cmap = 'coolwarm', annot=True)
     plt.tight_layout()
 
-    logger.log({'classification_report': wandb.Image(ax.figure)})
+    if logger != '':
+        logger.log({'classification_report': wandb.Image(ax.figure)})
     
 
     return accuracies
@@ -394,9 +398,9 @@ epochs = 4
 TRAIN_BATCH_SIZE = 64
 VALID_BATCH_SIZE = 64
 
-wandb_logger = Logger(f"inm706_cw_test_lstm", project='inm706_cw')
-logger = wandb_logger.get_logger()
-#logger = []
+logger = ''
+# wandb_logger = Logger(f"inm706_cw_test_lstm", project='inm706_cw')
+# logger = wandb_logger.get_logger()
 
 dataset = NERDocuments()
 vocab = dataset.get_vocab()
