@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name inm705_CW                       # Job name
+#SBATCH --job-name inm706_CW                       # Job name
 #SBATCH --partition=prigpu                         # Select the correct partition.
 #SBATCH --nodes=1                                  # Run on 1 nodes (each node has 48 cores)
 #SBATCH --ntasks-per-node=1                        # Run one task
@@ -9,8 +9,8 @@
 #SBATCH --gres=gpu:1                               # Use one gpu.
 #SBATCH -e results/%x_%j.e                         # Standard output and error log [%j is replaced with the jobid]
 #SBATCH -o results/%x_%j.o                         # [%x with the job name], make sure 'results' folder exists.
-#SBATCH --error inm705_CW_err.err
-#SBATCH --output inm705_CW_out.output
+#SBATCH --error inm706_CW_err.err
+#SBATCH --output inm706_CW_out.output
 
 #Enable modules command
 

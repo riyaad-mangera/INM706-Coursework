@@ -34,7 +34,7 @@ def load_data(dataset):
     
     return (dataset.load_train_data(), dataset.load_test_data(), dataset.load_valid_data())
 
-def train(model, training_loader, validation_loader, loss_function, optimiser, vocab, indexed_labels, logger, steps, epochs = 5):
+def train(model, training_loader, validation_loader, loss_function, optimiser, vocab, indexed_labels, logger, epochs = 5):
 
     #(tokens, labels) = training_loader[0]
 
@@ -104,6 +104,7 @@ def train(model, training_loader, validation_loader, loss_function, optimiser, v
 
             tokens = batch["tokens"]
             labels = batch["labels"]
+            attention_mask = batch["attention_mask"].to(torch.bool)
 
             model.zero_grad()
 
@@ -112,13 +113,16 @@ def train(model, training_loader, validation_loader, loss_function, optimiser, v
 
             tokens = tokens.to(device)
             labels = labels.to(device)
+            attention_mask = attention_mask.to(device)
             
-            predictions = model(tokens)
+            predictions, logits = model(tokens, attention_mask, labels)
 
-            predictions.to(device)
+            predictions = predictions.to(device)
+            logits = logits.to(device)
 
             #loss = loss_function(predictions, targets)
-            loss = torch.nn.functional.cross_entropy(predictions, labels)
+            #loss = torch.nn.functional.cross_entropy(predictions, labels)
+            loss = loss_function(logits, labels)
             loss.backward()
 
             optimiser.step()
@@ -140,21 +144,29 @@ def train(model, training_loader, validation_loader, loss_function, optimiser, v
 
                     valid_inputs = batch["tokens"]
                     valid_targets = batch["labels"]
+                    valid_attention_mask = batch["attention_mask"].to(torch.bool)
 
                     #print(f'Valid Targets: {valid_targets.tolist()}')
 
                     valid_inputs = valid_inputs.to(device)
                     valid_targets = valid_targets.to(device)
             
-                    valid_predictions = model(valid_inputs)
+                    valid_predictions, valid_logits = model(valid_inputs, valid_attention_mask, valid_targets)
 
-                    valid_predictions.to(device)
+                    valid_predictions = valid_predictions.to(device)
+                    valid_logits = valid_logits.to(device)
+                    valid_attention_mask = valid_attention_mask.to(device)
 
-                    valid_loss = torch.nn.functional.cross_entropy(valid_predictions, valid_targets)
+                    #valid_loss = torch.nn.functional.cross_entropy(valid_predictions, valid_targets)
+                    valid_loss = loss_function(valid_logits, labels)
 
                     #print(f'Valid Set: {valid_set}')
 
                     test_pred = torch.argmax(valid_predictions, dim = 1)
+
+                    valid_targets = torch.masked_select(valid_targets.view(-1), valid_attention_mask.view(-1))
+                    test_pred = torch.masked_select(torch.argmax((valid_logits.view(-1, 170)), axis = 1), valid_attention_mask.view(-1))
+
 
                     #print(test)
                     #print(valid_targets)
@@ -246,6 +258,8 @@ def test(model, testing_loader, ids_to_labels, logger):
 
         valid_set = []
 
+        print(f'Testing {int(len(testing_loader.dataset)/VALID_BATCH_SIZE)} batches')
+
         for idx, batch in enumerate(testing_loader):
             valid_set[:] = []
             
@@ -254,15 +268,16 @@ def test(model, testing_loader, ids_to_labels, logger):
 
             inputs = batch["tokens"]
             targets = batch["labels"]
+            attention_mask = batch["attention_mask"]
 
             #print(valid_targets)
 
             inputs = inputs.to(device)
             targets = targets.to(device)
     
-            predictions = model(inputs)
+            predictions, logits = model(inputs, attention_mask, targets)
 
-            predictions.to(device)
+            predictions = predictions.to(device)
 
             """for prediction in predictions:
                 valid_set.append(np.int64(torch.argmax(prediction).cpu()))"""
@@ -322,8 +337,8 @@ def test(model, testing_loader, ids_to_labels, logger):
 
     #print(test_report)
 
-    report = classification_report(y_true_labels[0], y_pred_labels[0], output_dict = True)
-    print(f'classification_report:\n{classification_report(y_true_labels[0], y_pred_labels[0], output_dict = False)}')
+    report = classification_report(y_true_labels[0], y_pred_labels[0], output_dict = True, zero_division = 0)
+    print(f'classification_report:\n{classification_report(y_true_labels[0], y_pred_labels[0], output_dict = False, zero_division = 0)}')
 
     plt.figure(figsize = (15, 30))
     ax = sns.heatmap(pd.DataFrame(report).iloc[:-1, :].T, cmap = 'coolwarm', annot=True)
@@ -375,11 +390,11 @@ embedding_dim = 100
 hidden_dim = 100
 
 steps = 10000
-epochs = 20
+epochs = 4
 TRAIN_BATCH_SIZE = 64
 VALID_BATCH_SIZE = 64
 
-wandb_logger = Logger(f"inm705_cw_test_lstm", project='inm705_cw')
+wandb_logger = Logger(f"inm706_cw_test_lstm", project='inm706_cw')
 logger = wandb_logger.get_logger()
 #logger = []
 
@@ -390,9 +405,9 @@ ids_to_labels = dict(map(reversed, labels_to_id.items()))
 
 train_data, test_data, valid_data = load_data(dataset)
 
-training_set = CustomDataset(train_data, labels_to_id, vocab, 16384)
-testing_set = CustomDataset(test_data, labels_to_id, vocab, 16384)
-validation_set = CustomDataset(valid_data, labels_to_id, vocab, 512)
+training_set = CustomDataset(train_data, labels_to_id, vocab, 256)
+testing_set = CustomDataset(test_data, labels_to_id, vocab, 256)
+validation_set = CustomDataset(valid_data, labels_to_id, vocab, 256)
 
 """flat_labels = [label for labels in train_data[1] for label in labels]
 unique_labels = list(set(flat_labels))
@@ -438,12 +453,14 @@ print(f'Dataset len: {len(training_loader.dataset)}')
 testing_set = {"targets": test_data[0], "labels": test_data[1]}
 validation_set = {"targets": valid_data[0], "labels": valid_data[1]}"""
 
-model = models.LSTMModel(embedding_dim, hidden_dim, len(vocab), len(labels_to_id))
+tokens_to_id = {ch:i for i,ch in enumerate(vocab)}
+
+model = models.LSTMModel(embedding_dim, hidden_dim, len(vocab), len(labels_to_id), tokens_to_id, device)
 loss_function = torch.nn.CrossEntropyLoss()
 #optimiser = torch.optim.SGD(model.parameters(), lr=0.1)
 optimiser = torch.optim.Adam(model.parameters(), lr = 0.1, weight_decay = 0.0)
 
-losses, valid_accuracies = train(model, training_loader, validation_loader, loss_function, optimiser, vocab, labels_to_id, logger, steps, epochs)
+losses, valid_accuracies = train(model, training_loader, validation_loader, loss_function, optimiser, vocab, labels_to_id, logger, epochs)
 
 #print(losses)
 

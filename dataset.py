@@ -53,14 +53,14 @@ class CustomDataset(Dataset):
             tokens_as_lst[index] = tokens_as_lst[index] + ["[PAD]" for _ in range(maxlen - len(tokens_as_lst[index]))]
             labels_as_lst[index] = labels_as_lst[index] + ["O" for _ in range(maxlen - len(labels_as_lst[index]))]
 
-            if(len(labels_as_lst[index]) == 171):
-                print("AAAAAAAAA")
+        attention_mask = [1 if token != "[PAD]" else 0 for token in tokens_as_lst]
 
         token_ids = self.convert_to_tensor(tokens_as_lst[index], self.vocab)
         label_ids = [self.labels_to_id[label] for label in labels_as_lst[index]]
 
         return {"tokens": torch.tensor(token_ids, dtype = torch.long), 
-                "labels": torch.tensor(label_ids, dtype = torch.long)
+                "labels": torch.tensor(label_ids, dtype = torch.long),
+                "attention_mask": torch.tensor(attention_mask, dtype = torch.long)
                 }
     
     def __len__(self):
@@ -123,7 +123,7 @@ class NERDocuments:
             label.insert(0, "O")
             label.insert(-1, "O")
 
-            maxlen = 256
+            maxlen = len(self.labels_to_id)
 
             if (len(token) > maxlen):
                 # truncate

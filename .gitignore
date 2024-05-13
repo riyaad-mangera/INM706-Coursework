@@ -1,0 +1,18 @@
+# environment files
+basketball_classification_env/
+
+# video dataset
+dataset/
+padded_dataset/
+raw_dataset/
+trimmed_dataset/
+old_dataset/
+
+#checkpoints
+checkpoints/
+
+# cache
+__pycache__/
+
+# wandb logging
+wandb/
