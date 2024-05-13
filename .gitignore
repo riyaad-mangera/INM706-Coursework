@@ -1,12 +1,8 @@
 # environment files
-basketball_classification_env/
+INM707_CW_env/
 
 # video dataset
-dataset/
-padded_dataset/
-raw_dataset/
-trimmed_dataset/
-old_dataset/
+data/
 
 #checkpoints
 checkpoints/
