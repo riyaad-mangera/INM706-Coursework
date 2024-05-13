@@ -1,7 +1,7 @@
 # environment files
 INM707_CW_env/
 
-# video dataset
+# dataset
 data/
 
 #checkpoints
