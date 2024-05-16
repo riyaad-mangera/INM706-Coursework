@@ -3,6 +3,7 @@ import tensorflow as tf
 import numpy as np
 import pandas as pd
 from dataset import CustomDataset, NERDocuments
+from dataset_simpler import CustomSimplerDataset, NERSimplerDocuments
 import models
 import matplotlib.pyplot as plt
 from logger import Logger
@@ -12,6 +13,7 @@ import copy
 import wandb
 import seaborn as sns
 from torch.utils.data import Dataset, DataLoader, TensorDataset
+import pickle
 
 if torch.cuda.is_available():
     device = torch.device('cuda')
@@ -29,6 +31,18 @@ def plot_loss(epochs, losses, name = 'fig'):
     plt.savefig(f'{name}.png')
     plt.clf()
     plt.close()
+
+def save_model(model, epoch):
+    print('saving model')
+    with open(f'./checkpoints/saved_model_ep_{epoch}.pkl', 'wb') as file:
+        pickle.dump(model, file)
+
+def load_model(dir):
+    print(f'loading model')
+    with open(dir, 'rb') as file:
+        model = pickle.load(file)
+
+    return model
 
 def load_data(dataset):
     
@@ -128,6 +142,8 @@ def train(model, training_loader, validation_loader, loss_function, optimiser, v
             optimiser.step()
             epoch_losses.append(np.float64(loss.cpu().detach().numpy()))
             
+########################################### VALIDATION ##############################################################
+
             with torch.no_grad():
                 model.eval()
 
@@ -157,33 +173,48 @@ def train(model, training_loader, validation_loader, loss_function, optimiser, v
                     valid_logits = valid_logits.to(device)
                     valid_attention_mask = valid_attention_mask.to(device)
 
-                    #valid_loss = torch.nn.functional.cross_entropy(valid_predictions, valid_targets)
+                    # valid_loss = torch.nn.functional.cross_entropy(valid_predictions, valid_targets)
                     valid_loss = loss_function(valid_logits, labels)
 
-                    #print(f'Valid Set: {valid_set}')
+                    # print(f'Valid Set: {valid_set}')
 
                     test_pred = torch.argmax(valid_predictions, dim = 1)
 
-                    valid_targets = torch.masked_select(valid_targets.view(-1), valid_attention_mask.view(-1))
-                    test_pred = torch.masked_select(torch.argmax((valid_logits.view(-1, 170)), axis = 1), valid_attention_mask.view(-1))
+                    flattened_targets = valid_targets.view(-1)
+                    active_accuracy = valid_attention_mask.view(-1)
 
+                    # print(valid_targets.shape)
+                    # print(valid_attention_mask.shape)
 
-                    #print(test)
-                    #print(valid_targets)
+                    # active_logits = valid_logits.view(-1, 37)
+                    active_logits = valid_logits.view(-1, 37)
+                    flattened_predictions = torch.argmax(active_logits, axis=1)
 
-                    #print(len(valid_predictions[0]))
-                    #print(len(valid_targets[0]))
+                    # valid_targets = torch.masked_select(valid_targets.view(-1), valid_attention_mask.view(-1))
+                    # test_pred = torch.masked_select(torch.argmax((valid_logits.view(-1, 170)), axis = 1), valid_attention_mask.view(-1))
 
-                    #acc = torch.eq(valid_set, valid_targets.tolist())
-                    #valid_accuracry = (len(set(valid_set).intersection(valid_targets.tolist()))) / len(valid_set)
+                    # test_targets = flattened_targets
+                    # test_pred = flattened_predictions
+
+                    # test_targets = torch.masked_select(flattened_targets, active_accuracy)
+                    # test_pred = torch.masked_select(flattened_predictions, active_accuracy)
+                    
+                    # print(test)
+                    # print(valid_targets)
+
+                    # print(len(valid_predictions[0]))
+                    # print(len(valid_targets[0]))
+
+                    # acc = torch.eq(valid_set, valid_targets.tolist())
+                    # valid_accuracry = (len(set(valid_set).intersection(valid_targets.tolist()))) / len(valid_set)
 
                     valid_accuracy = torch.sum(torch.eq(test_pred, valid_targets)).item()/test_pred.nelement()
-                    #print(f'Acc: {valid_accuracry}')
+                    # print(f'Acc: {valid_accuracry}')
                     valid_accuracies.append(valid_accuracy)
                     valid_losses.append(np.float64(valid_loss.cpu().detach().numpy()))
 
-                    if logger != '':
-                        logger.log({'batch_accuracy': valid_accuracy})
+                    # if logger != '':
+                    #     logger.log({'batch_accuracy': valid_accuracy})
             
             model.train()
 
@@ -196,9 +227,12 @@ def train(model, training_loader, validation_loader, loss_function, optimiser, v
         #logger.log({'average_valid_accuracy': average_valid_accuracy})
 
         if logger != '':
-            logger.log({'train_loss': np.sum(epoch_losses) / len(epoch_losses)})
-            logger.log({'validation_accuracy': np.sum(valid_accuracies) / len(valid_accuracies)})
-            logger.log({'validation_loss': np.sum(valid_losses) / len(valid_losses)})
+            logger.log({'train_loss': np.sum(epoch_losses) / len(epoch_losses),
+                        'validation_accuracy': np.sum(valid_accuracies) / len(valid_accuracies),
+                        'validation_loss': np.sum(valid_losses) / len(valid_losses)})
+
+        if epoch % 4 == 0:
+            save_model(model, epoch)
 
     """with torch.no_grad():
         inputs = convert_to_tensor(tokens[len(tokens) - 2], indexed_tokens)
@@ -244,6 +278,8 @@ def train(model, training_loader, validation_loader, loss_function, optimiser, v
 
         print(tokens[len(tokens) - 2])
         print(test)"""
+
+    save_model(model, epochs)
 
     print(f'Validation Accuracies: {average_valid_accuracy}')
     return average_losses, average_valid_accuracy
@@ -393,25 +429,31 @@ valid_accuracies = []
 embedding_dim = 100
 hidden_dim = 100
 
-steps = 10000
-epochs = 4
+train_sample_frac = 0.5
+test_sample_frac = 0.5
+epochs = 10
 TRAIN_BATCH_SIZE = 64
 VALID_BATCH_SIZE = 64
 
 logger = ''
-# wandb_logger = Logger(f"inm706_cw_test_lstm", project='inm706_cw')
-# logger = wandb_logger.get_logger()
+wandb_logger = Logger(f"inm706_cw_test_lstm_", project='inm706_cw_simpler_dataset')
+logger = wandb_logger.get_logger()
 
-dataset = NERDocuments()
+# dataset = NERDocuments()
+dataset = NERSimplerDocuments()
 vocab = dataset.get_vocab()
 labels_to_id = dataset.get_labels_to_id()
 ids_to_labels = dict(map(reversed, labels_to_id.items()))
 
 train_data, test_data, valid_data = load_data(dataset)
 
-training_set = CustomDataset(train_data, labels_to_id, vocab, 256)
-testing_set = CustomDataset(test_data, labels_to_id, vocab, 256)
-validation_set = CustomDataset(valid_data, labels_to_id, vocab, 256)
+# training_set = CustomDataset(train_data, labels_to_id, vocab, train_sample_frac)
+# testing_set = CustomDataset(test_data, labels_to_id, vocab, test_sample_frac)
+# validation_set = CustomDataset(valid_data, labels_to_id, vocab, test_sample_frac)
+
+training_set = CustomSimplerDataset(train_data, labels_to_id, vocab, train_sample_frac)
+testing_set = CustomSimplerDataset(test_data, labels_to_id, vocab, test_sample_frac)
+validation_set = CustomSimplerDataset(valid_data, labels_to_id, vocab, test_sample_frac)
 
 """flat_labels = [label for labels in train_data[1] for label in labels]
 unique_labels = list(set(flat_labels))
@@ -459,17 +501,17 @@ validation_set = {"targets": valid_data[0], "labels": valid_data[1]}"""
 
 tokens_to_id = {ch:i for i,ch in enumerate(vocab)}
 
+# model = models.LSTMAttnModel(embedding_dim, hidden_dim, len(vocab), len(labels_to_id), tokens_to_id, device)
 model = models.LSTMModel(embedding_dim, hidden_dim, len(vocab), len(labels_to_id), tokens_to_id, device)
+
 loss_function = torch.nn.CrossEntropyLoss()
 #optimiser = torch.optim.SGD(model.parameters(), lr=0.1)
 optimiser = torch.optim.Adam(model.parameters(), lr = 0.1, weight_decay = 0.0)
 
-losses, valid_accuracies = train(model, training_loader, validation_loader, loss_function, optimiser, vocab, labels_to_id, logger, epochs)
+# losses, valid_accuracies = train(model, training_loader, validation_loader, loss_function, optimiser, vocab, labels_to_id, logger, epochs)
 
-#print(losses)
-
-#plot_loss(epochs, losses, 'losses')
-#plot_loss(epochs, valid_accuracies, 'accuracy')
+checkpoint_dir = './checkpoints/simpler_dataset/baseline_lstm_1/saved_model_ep_10.pkl'
+model = load_model(checkpoint_dir)
 
 test_accuracies = test(model, testing_loader, ids_to_labels, logger)
 print(f'Test Accuracies: {test_accuracies}')

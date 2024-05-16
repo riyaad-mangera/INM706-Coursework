@@ -4,9 +4,10 @@ from torch.utils.data import Dataset
 import torch
 
 class CustomDataset(Dataset):
-    def __init__(self, data, labels_to_id, vocab, slice_ratio):
+    def __init__(self, data, labels_to_id, vocab, sample_frac):
 
-        self.data = data.head(slice_ratio)
+        #self.data = data.head(slice_ratio)
+        self.data = data.sample(frac = sample_frac)
 
         self.tokens = data.tokens
         self.labels = data.ner_tags
@@ -53,7 +54,7 @@ class CustomDataset(Dataset):
             tokens_as_lst[index] = tokens_as_lst[index] + ["[PAD]" for _ in range(maxlen - len(tokens_as_lst[index]))]
             labels_as_lst[index] = labels_as_lst[index] + ["O" for _ in range(maxlen - len(labels_as_lst[index]))]
 
-        attention_mask = [1 if token != "[PAD]" else 0 for token in tokens_as_lst]
+        attention_mask = [1 if token != "[PAD]" else 0 for token in tokens_as_lst[index]]
 
         token_ids = self.convert_to_tensor(tokens_as_lst[index], self.vocab)
         label_ids = [self.labels_to_id[label] for label in labels_as_lst[index]]
