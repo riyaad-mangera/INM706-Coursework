@@ -13,6 +13,7 @@ class CustomSimplerDataset(Dataset):
         self.labels = data.tags
 
         self.labels_to_id = labels_to_id
+
         self.ids_to_label = dict(map(reversed, labels_to_id.items()))
         self.vocab = vocab
 
@@ -42,8 +43,8 @@ class CustomSimplerDataset(Dataset):
 
         labels_as_lst[index] = ["O"] + labels_as_lst[index] + ["O"]
 
-        maxlen = len(self.labels_to_id)
-        #maxlen = 128
+        #maxlen = len(self.labels_to_id)
+        maxlen = 50
 
         if (len(tokens_as_lst[index]) > maxlen):
             # truncate
@@ -59,7 +60,7 @@ class CustomSimplerDataset(Dataset):
         token_ids = self.convert_to_tensor(tokens_as_lst[index], self.vocab)
         label_ids = [self.labels_to_id[label] for label in labels_as_lst[index]]
 
-        return {"tokens": torch.tensor(token_ids, dtype = torch.long), 
+        return {"tokens": token_ids, 
                 "labels": torch.tensor(label_ids, dtype = torch.long),
                 "attention_mask": torch.tensor(attention_mask, dtype = torch.long)
                 }
@@ -89,6 +90,10 @@ class NERSimplerDocuments:
         self.vocab['[CLS]'] = len(self.vocab)
         self.vocab['[SEP]'] = len(self.vocab)
         self.vocab['[PAD]'] = len(self.vocab)
+
+        self.labels_to_id['[CLS]'] = len(self.labels_to_id)
+        self.labels_to_id['[SEP]'] = len(self.labels_to_id)
+        self.labels_to_id['[PAD]'] = len(self.labels_to_id)
 
         #print(self.labels_to_id)
 
