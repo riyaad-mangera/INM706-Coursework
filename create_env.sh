@@ -7,6 +7,7 @@ cd inm706_cw
 which python
 python --version
 pip3 install --proxy http://hpc-proxy00.city.ac.uk:3128 pandas
+pip3 install --proxy http://hpc-proxy00.city.ac.uk:3128 scikit-learn
 pip3 install --proxy http://hpc-proxy00.city.ac.uk:3128 wandb
 pip3 install --proxy http://hpc-proxy00.city.ac.uk:3128 -r requirements.txt
 pip3 install --proxy http://hpc-proxy00.city.ac.uk:3128 torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
