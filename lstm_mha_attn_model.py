@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 
 class LSTMAttnModel(nn.Module):
@@ -19,25 +20,9 @@ class LSTMAttnModel(nn.Module):
 
     def forward(self, input, attention_mask, target):
 
-        # print(f'Input: {input.shape}')
-        # print(f'Attn: {attention_mask.shape}')
-
-        #embeddings = self.model[0](input)
         embeddings = self.embedding(input)
-
-        # print(f'Embed: {embeddings.shape}')
-        # print(embeddings.view(len(input), 64).shape)
-
         out_lstm, _ = self.lstm(embeddings)
-
-        # print(f'LSTM: {out_lstm.shape}')
-
         out_attention, attn_weights = self.attention(out_lstm, out_lstm, out_lstm)
-
-        # print(f'Out_Attn: {out_attention.shape}')
-
         logits = self.linear(out_attention)
-
-        # print(f'Linear: {logits.shape}')
 
         return logits.view(len(input), self.labels_size, -1)

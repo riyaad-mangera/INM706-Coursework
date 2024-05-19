@@ -20,17 +20,8 @@ class BiLSTMModel(nn.Module):
         
     def forward(self, input, attention_mask, target):
 
-        # print(f'Input: {input.shape}')
-
         embeddings = self.embedding(input)
-        # print(f'Embed: {embeddings.shape}')
-
         out_lstm, _ = self.lstm(embeddings)
-        # print(f'LSTM: {out_lstm.shape}')
-
         logits = self.linear(out_lstm)
-        # print(f'Linear: {logits.shape}')
-
-        # print(logits.view(len(input), 40, -1))
 
         return logits.view(len(input), self.labels_size, -1)

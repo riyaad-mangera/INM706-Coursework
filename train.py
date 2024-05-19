@@ -1,27 +1,26 @@
 import torch
 import numpy as np
 import pandas as pd
-from dataset import CustomDataset, NERDocuments
+import matplotlib.pyplot as plt
+import wandb
+import seaborn as sns
+import pickle
+import itertools
+import yaml
+from torch.utils.data import DataLoader
+from logger import Logger
+
+from seqeval.metrics import classification_report
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import f1_score as f1
+
+from warnings import simplefilter
+
 from dataset_simpler import CustomSimplerDataset, NERSimplerDocuments
 import baseline_lstm_model
 import lstm_mha_attn_model
 import bilstm_model
 import bilstmcrf_model
-import matplotlib.pyplot as plt
-from logger import Logger
-from seqeval.metrics import classification_report
-from sklearn.metrics import classification_report as c_report
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-from sklearn.metrics import f1_score as f1
-import copy
-import wandb
-import seaborn as sns
-from torch.utils.data import Dataset, DataLoader, TensorDataset
-import pickle
-import itertools
-import os
-import yaml
-from warnings import simplefilter
 
 simplefilter(action='ignore', category=FutureWarning)
 
@@ -95,7 +94,7 @@ def load_data(dataset):
 
 #============================ TRAINING ===================================================================
 
-def train(model, training_loader, validation_loader, loss_function, optimiser, vocab, indexed_labels, logger, epochs = 5, use_attn = False):
+def train(model, training_loader, validation_loader, loss_function, optimiser, logger, epochs = 5, use_attn = False):
     
     model.to(device)
     loss_function.to(device)
@@ -153,54 +152,39 @@ def train(model, training_loader, validation_loader, loss_function, optimiser, v
 
                     valid_inputs = valid_inputs.to(device)
                     valid_targets = valid_targets.to(device)
+                    valid_attention_mask = valid_attention_mask.to(device)
             
                     valid_logits = model(valid_inputs, valid_attention_mask, valid_targets)
 
-                    # valid_logits = valid_logits.to(device)
-                    # valid_attention_mask = valid_attention_mask.to(device)
-
                     valid_loss = loss_function(valid_logits, labels)
-
-                    # valid_predictions = torch.nn.functional.softmax(valid_loss).to(device)
 
                     softmax = torch.nn.Softmax(dim=0)
                     valid_predictions = softmax(valid_logits)
 
                     test_pred = torch.argmax(valid_predictions, dim = 1)
 
-                    flattened_targets = valid_targets.view(-1)
-                    active_accuracy = valid_attention_mask.view(-1)
+                    if use_attn:
 
-                    # print(valid_targets.shape)
-                    # print(valid_attention_mask.shape)
+                        active_accuracy = valid_attention_mask.view(-1)
 
-                    # active_logits = valid_logits.view(-1, 40)
-                    # flattened_predictions = torch.argmax(active_logits, axis=1)
+                        active_logits = valid_logits.view(-1, 40)
+                        flattened_predictions = torch.argmax(active_logits, axis=1)
 
-                    # valid_targets = torch.masked_select(valid_targets.view(-1), valid_attention_mask.view(-1))
-                    # test_pred = torch.masked_select(torch.argmax((valid_logits.view(-1, 170)), axis = 1), valid_attention_mask.view(-1))
+                        valid_targets = torch.masked_select(valid_targets.view(-1), valid_attention_mask.view(-1))
+                        test_pred = torch.masked_select(torch.argmax((valid_logits.view(-1, 40)), axis = 1), valid_attention_mask.view(-1))
 
-                    # test_targets = flattened_targets
-                    # test_pred = flattened_predictions
+                        test_pred = flattened_predictions
 
-                    # test_targets = torch.masked_select(flattened_targets, active_accuracy)
-                    # test_pred = torch.masked_select(flattened_predictions, active_accuracy)
-                    
-                    # print(test)
-                    # print(valid_targets)
+                        test_pred = torch.masked_select(flattened_predictions, active_accuracy)
 
-                    # print(len(valid_predictions[0]))
-                    # print(len(valid_targets[0]))
+                        f1_score = f1(valid_targets.cpu().detach().numpy(), test_pred.cpu().detach().numpy(), average='weighted')
+                        valid_accuracy = torch.sum(torch.eq(test_pred, valid_targets)).item()/test_pred.nelement()
+                        # print(f'Acc: {valid_accuracy}')
 
-                    # acc = torch.eq(valid_set, valid_targets.tolist())
-                    # valid_accuracry = (len(set(valid_set).intersection(valid_targets.tolist()))) / len(valid_set)
+                    else:
 
-                    # valid_accuracy = torch.sum(torch.eq(test_pred, valid_targets)).item()/test_pred.nelement()
-                    # # print(f'Acc: {valid_accuracry}')
-                    # valid_accuracies.append(valid_accuracy)
-
-                    f1_score = f1(valid_targets.flatten().cpu().detach().numpy(), test_pred.flatten().cpu().detach().numpy(), average='weighted')
-                    valid_accuracy = torch.sum(torch.eq(test_pred, valid_targets)).item()/test_pred.nelement()
+                        f1_score = f1(valid_targets.flatten().cpu().detach().numpy(), test_pred.flatten().cpu().detach().numpy(), average='weighted')
+                        valid_accuracy = torch.sum(torch.eq(test_pred, valid_targets)).item()/test_pred.nelement()
 
                     valid_f1_scores.append(f1_score)
                     valid_accuracies.append(valid_accuracy)
@@ -283,13 +267,12 @@ def test(model, testing_loader, ids_to_labels, logger):
     for labels in y_pred:
         y_pred_labels.append([[ids_to_labels.get(np.int64(label.cpu().item())) for label in tens_labels] for tens_labels in labels])
 
-    matrix = confusion_matrix(list(itertools.chain.from_iterable(y_true_labels[0])), list(itertools.chain.from_iterable(y_pred_labels[0])), labels=list(ids_to_labels.values()))
+    matrix = confusion_matrix(list(itertools.chain.from_iterable(y_true_labels[0])), list(itertools.chain.from_iterable(y_pred_labels[0])), labels=list(ids_to_labels.values()), normalize='true')
 
     cm = ConfusionMatrixDisplay(matrix/np.sum(matrix), display_labels=list(ids_to_labels.values()))
-    print(f'Confusion Matrix:\n{cm}')
 
-    fig, ax = plt.subplots(figsize=(10, 10))
-    cm.plot(ax=ax, cmap=plt.cm.Blues)
+    fig, ax = plt.subplots(figsize=(30, 30))
+    cm.plot(ax=ax, cmap=plt.cm.Blues, values_format='.2f')
     plt.xticks(rotation=90)
     plt.tight_layout()
     # plt.show()
@@ -298,7 +281,7 @@ def test(model, testing_loader, ids_to_labels, logger):
     report = classification_report(y_true_labels[0], y_pred_labels[0], output_dict = True, zero_division = 0)
     print(f'classification_report:\n{classification_report(y_true_labels[0], y_pred_labels[0], output_dict = False, zero_division = 0)}')
 
-    plt.figure(figsize = (30, 15))
+    plt.figure(figsize = (5, 15))
     ax = sns.heatmap(pd.DataFrame(report).iloc[:-1, :].T, cmap = 'coolwarm', annot=True)
     plt.tight_layout()
     # plt.show()
@@ -335,11 +318,11 @@ print(f'Unique Tokens:{len(tokens_to_id)}')
 #============================ CALLING FUNCTIONS ===================================================================
 
 logger = ''
-# wandb_logger = Logger(f"inm706_cw_lstm_attn_adam_test", project='inm706_cw_simpler_dataset')
-# logger = wandb_logger.get_logger()
+wandb_logger = Logger(f"inm706_cw_inference_lstm_mha_attn_test", project='inm706_cw_simpler_dataset')
+logger = wandb_logger.get_logger()
 
 # model = baseline_lstm_model.LSTMModel('_Base_LSTM_sgd_test', embedding_dim, hidden_dim, len(vocab), len(labels_to_id), labels_to_id, device)
-model = lstm_mha_attn_model.LSTMAttnModel('AAAAAAA', embedding_dim, hidden_dim, len(vocab), len(labels_to_id), tokens_to_id, device)
+model = lstm_mha_attn_model.LSTMAttnModel('LSTM_MHA_sgd', embedding_dim, hidden_dim, len(vocab), len(labels_to_id), labels_to_id, device)
 # model = bilstmcrf_model.BiLSTMCRFModel('BILSTMCRF_test', embedding_dim, hidden_dim, len(vocab), len(labels_to_id), labels_to_id, device)
 # model = bilstm_model.BiLSTMModel('BILSTM_test', embedding_dim, hidden_dim, len(vocab), len(labels_to_id), labels_to_id, device)
 
@@ -352,10 +335,10 @@ optimiser = torch.optim.SGD(model.parameters(), lr = learning_rate, momentum = 0
 # checkpoint_dir = './checkpoints/simpler_dataset/baseline_lstm_1/saved_model_ep_10.pkl'
 # model = load_model(checkpoint_dir)
 
-losses, valid_f1_scores = train(model, training_loader, validation_loader, loss_function, optimiser, vocab, labels_to_id, logger, epochs)
+# losses, valid_f1_scores = train(model, training_loader, validation_loader, loss_function, optimiser, logger, epochs, use_attn=False)
 
 # Load checkpoint for testing
-checkpoint_dir = './checkpoints/simpler_dataset/base_lstm_sgd_test_1/saved_model__Base_LSTM_sgd_test_ep_150.pkl'
+checkpoint_dir = './trained_models/LSTM_MHA.pkl'
 model = load_model(checkpoint_dir)
 
 test_accuracies = test(model, testing_loader, ids_to_labels, logger)
